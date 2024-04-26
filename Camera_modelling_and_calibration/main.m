@@ -1,0 +1,217 @@
+% ----------- STEP 1 -------------------
+% Intrinsic parameters = Camera coordinates
+% Extrensic parameters= world coordinates
+au = 557.0943; av = 712.9824;
+u0 = 326.3819; v0 = 298.6679;
+
+% Location of the world reference frame in camera coordinates in mm
+Tx = 100; Ty = 0; Tz = 1500;
+% World rotation w.r.t. camera coordinates
+
+% Euler X Y X1 angles
+Phix = 0.8*pi/2;
+Phiy = -1.8*pi/2;
+Phix1 = pi/5;
+
+% ----------- STEP 2 -------------------
+% K and cTw
+K=[au 0 u0 ; 0 av v0 ; 0 0 1 ];
+
+% Rotations Rx, Ry, Rx1  = from RM lecture
+Rx=[1 0 0; 0 cos(Phix) -sin(Phix); 0 sin(Phix) cos(Phix)];
+Ry=[cos(Phix) 0 0; 0 1 sin(Phix); -sin(Phix) 0 cos(Phix)];
+Rx1=[1 0 0; 0 cos(Phix1) -sin(Phix1); 0 sin(Phix1) cos(Phix1)];
+
+% cRw = rotation
+cRw = Rx * Ry * Rx1;
+
+% ctw = translation
+ctw= [Tx; Ty; Tz];
+
+% cTw
+cTw=[cRw ctw; 0 0 0 1];
+
+% identity + 0 vector
+M= [1 0 0 0; 0 1 0 0; 0 0 1 0];
+
+% Projection matrix = P = 3 x 4 
+P= K * M* cTw;
+
+% ----------- STEP 3 -------------------
+% Define a set of six 3D points in the range [-480:480; -480:480; -480:480]
+
+% random 0,1s = rand(6,3)
+% * 960 to randoms 
+% - 480 for range
+
+%points_3d = 6x4
+points_3d= (480+480)*rand(6,3) - 480;    
+points_3d=[points_3d, ones(6, 1)];      % for homogenous matrix add 1 = last col
+total_points=size(points_3d,1);    % size = for loops
+disp("Total points")
+disp(total_points)
+
+% ----------- STEP 4 -------------------
+% project the 3D points onto 2d points in the image plane
+
+%initialize 
+% 2D pts= 6x3
+points_2d= zeros(size(points_3d,1),3);
+
+%projection
+for i =1: size(points_3d,1)
+    point_2d=P*points_3d(i,:)';     % 2D pts (3x1)  = P (3x4) * 3D pts (1x4)->(4x1) =>  ( * = 3D to 2D)
+    points_2d(i,:)=point_2d(1:3)/point_2d(3);  % norm= [4 4 2] / 2 (3rd point) -> ensures that point is 2D (x, y) in the image plane.
+end
+disp("2D points")
+disp(points_2d)
+
+% ----------- STEP 5 -------------------
+% Open window = to show the image plane
+
+% Plot 2D 
+% scatter = (x,y, size, 'color', 'marker', 'filled pts')
+scatter(points_2d(:,1), points_2d(:,2), 50, 'b', 'o', 'filled');
+title('2D PROJECTION OF 3D POINTS ON THE IMAGE PLANE');
+xlabel('X-axis (image plane)');
+ylabel('Y-axis (image plane)');
+
+axis equal;
+
+% ----------- STEP 6 -------------------
+% step 3 + step 5 = P = using METHOD OF HALL
+
+Q= zeros(2*total_points, 11);        % Q = 12x11 (lec slides)
+
+% cartesian_points = (x,y,w) -> (x,y) = for B
+cartesian_points= points_2d(:, 1:2) ./ points_2d(:,3);
+
+% 2nd last slide = B = 1 col all Xs and Ys =(2x6 to 12x1)
+% reshape requires T of cartesian_points
+B=reshape(cartesian_points', [2*total_points,1]);      
+
+% 2nd last slide = Q
+for i=1:total_points
+
+    Xi= points_3d(i,1:3);  %(Xw, Yw, Zw) = 3D
+    xi=points_2d(i, 1:2);  %(Xu, Yu) = 2D 
+
+    % A matrix
+    Q (2*i-1,:)=[Xi, 1, zeros(1,4), -Xi(1)*xi(1),-Xi(2)*xi(1), -Xi(3)*xi(1)];
+    Q (2*i,:)=[zeros(1,4), Xi, 1, -Xi(1)*xi(2),-Xi(2)*xi(2), -Xi(3)*xi(2)];
+
+end
+
+% projection matrix A from Q and B
+% QA=B
+
+A= pinv(Q)*B;    % A = 11x1
+
+% add 1s to A in the end = 4th col projection matrix = homogenous
+% reshape to 4x3
+% transpose= ' = 3x4 
+P_matrix=1500*reshape([A;1], [4,3])'; 
+
+% ----------- STEP 7 -------------------
+% compare step 2 (P) and step 6  (P_matrix)
+disp("step 2 - P ")
+disp(P)
+disp("Step 6 - P matrix")
+disp(P_matrix)
+
+% Extract the intrinsic parameter matrix K, and the camera rotation matrix RwC from the camera projection matrix P
+% function given in lab handout
+[K_extracted, cRw_extracted] = get_intrinsics_from_proj_matrix(P_matrix);
+
+% ----------- STEP 8 -------------------
+% Add Gaussian noise = range [-1,+1] pixels 
+% sigma=0.95 
+% mean =0
+
+noisy_2d_points=add_noise(total_points, points_2d);
+
+% Again, repeat step 6 with the noisy 2D points and the 3D points defined in step 3.
+
+% new projection
+P_noisy= get_projection_matrix(total_points, points_3d, noisy_2d_points);       % STEP 6
+
+% Compare the projection matrix you obtain with the one you got in step 6, with the noise-free points. 
+disp("Non-noisy")
+disp(P_matrix)
+disp("Noisy")
+disp(P_noisy)
+
+% Extract the intrinsic parameter matrix K, and the camera rotation matrix cRw from the camera projection you just computed. 
+[K_noisy, cRw_noisy] = get_intrinsics_from_proj_matrix(P_noisy);
+disp("K-extracted")
+disp(K_extracted)
+disp("K_noisy")
+disp(K_noisy)
+disp("cRw-extracted")
+disp(cRw_extracted)
+disp("cRw_noisy")
+disp(cRw_noisy)
+
+% ----------- STEP 9 -------------------
+% compute the 2D points with the projection matrix
+points_2d_new= project_3d_points(P_noisy, points_3d);       % STEP 4 
+
+% compare them to those obtained in step 4. (comparison= average projection error) 
+
+% The average projection error is defined as the mean of the Euclidean distance between the 2D points of step 4 and those of step 8
+distances=sqrt(sum((points_2d_new-points_2d).^ 2, 2));
+average_projection_error=mean(distances);
+disp("Average projection error")
+disp(average_projection_error);
+
+% ----------- STEP 10 -------------------
+% Increase the number of 3D points up to 10 points and then up to 50 points and repeat step 8 and 9
+num_points=10;
+max_num_points=50;
+
+% initialize errors and points w 0s
+% each iteration = 4
+% 2 columns = error and point
+
+error_vs_pts=zeros(fix(max_num_points/4), 2);
+i=1;
+
+while num_points <= max_num_points
+    pts_3d=get_random_3d_points(num_points);    % STEP 3
+    
+    pts_2d =project_3d_points(P, pts_3d);       % STEP 4
+
+    pts_2d_n=add_noise(num_points, pts_2d);     % STEP 8
+
+    P_noisy=get_projection_matrix(num_points, pts_3d, pts_2d_n);    % STEP 6
+        
+    % STEP 9
+
+    P_2d_new= project_3d_points(P_noisy, pts_3d);        % STEP 4
+
+    distances=sqrt(sum((pts_2d_n-pts_2d).^ 2, 2));     
+    
+    average_projection_error=mean(distances);
+    
+    error_vs_pts(i,:)= [average_projection_error, num_points];
+
+    num_points=num_points+4;
+    
+    i=i+1;
+end
+
+% Plot a graph of the average projection error as a function of the number of points
+
+figure;
+x_values=error_vs_pts(:,1);     % x= errors
+y_values=error_vs_pts(:,2);     % y= # pts
+plot(x_values, y_values);
+xlabel('Number of points')
+ylabel('Average projection error')
+
+% Confirm that the higher the number of points used, the more accurate is the obtained projection matrix.
+
+%}
+
+
+
